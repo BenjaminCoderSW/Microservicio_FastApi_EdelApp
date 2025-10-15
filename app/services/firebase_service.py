@@ -2,6 +2,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore, auth
 from app.config import settings
 import os
+import json
 
 class FirebaseService:
     """Servicio singleton para manejar conexión con Firebase"""
@@ -17,13 +18,23 @@ class FirebaseService:
     def __init__(self):
         if not FirebaseService._initialized:
             try:
-                # Verificar que el archivo de credenciales existe
-                cred_path = settings.firebase_credentials_path
-                if not os.path.exists(cred_path):
-                    raise FileNotFoundError(f"No se encontró el archivo de credenciales: {cred_path}")
+                # Verificar si existe FIREBASE_CREDENTIALS_JSON (Render/Producción)
+                firebase_creds_json = os.getenv('FIREBASE_CREDENTIALS_JSON')
+                
+                if firebase_creds_json:
+                    # Usar credenciales desde variable de entorno
+                    cred_dict = json.loads(firebase_creds_json)
+                    cred = credentials.Certificate(cred_dict)
+                    print("✅ Usando credenciales desde variable de entorno (Producción)")
+                else:
+                    # Usar archivo local (desarrollo)
+                    cred_path = settings.firebase_credentials_path
+                    if not os.path.exists(cred_path):
+                        raise FileNotFoundError(f"No se encontró el archivo de credenciales: {cred_path}")
+                    cred = credentials.Certificate(cred_path)
+                    print("✅ Usando credenciales desde archivo local (Desarrollo)")
                 
                 # Inicializar Firebase Admin SDK
-                cred = credentials.Certificate(cred_path)
                 firebase_admin.initialize_app(cred)
                 
                 # Obtener instancia de Firestore
