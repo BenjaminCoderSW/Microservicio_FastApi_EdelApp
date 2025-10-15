@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
-from app.routers import auth, profile  # ← Agregar profile
+from app.routers import auth, profile
 from app.config import settings
 from dotenv import load_dotenv
+import os
 
 # Cargar variables de entorno
 load_dotenv()
@@ -20,10 +21,16 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Configurar CORS
+# ⚠️ IMPORTANTE: Configurar CORS para producción
+origins = [
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "*"  # En producción, reemplaza con dominios específicos
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción, especificar dominios permitidos
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,7 +38,7 @@ app.add_middleware(
 
 # Incluir routers
 app.include_router(auth.router)
-app.include_router(profile.router)  # ← Agregar esta línea
+app.include_router(profile.router)
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -40,7 +47,8 @@ async def root():
         "message": "Edel-SocialApp API",
         "version": settings.api_version,
         "status": "running",
-        "docs": "/docs"
+        "docs": "/docs",
+        "environment": os.getenv("ENVIRONMENT", "production")
     }
 
 @app.get("/health", tags=["Health"])
@@ -55,7 +63,7 @@ async def health_check():
 @app.on_event("startup")
 async def startup_event():
     print("🚀 Iniciando Edel-SocialApp API...")
-    print(f"📚 Documentación disponible en: http://localhost:8000/docs")
+    print(f"📚 Documentación disponible en: /docs")
 
 @app.on_event("shutdown")
 async def shutdown_event():
