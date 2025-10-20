@@ -1,5 +1,5 @@
 import firebase_admin
-from firebase_admin import credentials, firestore, auth
+from firebase_admin import credentials, firestore, auth, storage
 from app.config import settings
 import os
 import json
@@ -34,14 +34,23 @@ class FirebaseService:
                     cred = credentials.Certificate(cred_path)
                     print("✅ Usando credenciales desde archivo local (Desarrollo)")
                 
-                # Inicializar Firebase Admin SDK
-                firebase_admin.initialize_app(cred)
+                # Obtener bucket name
+                storage_bucket = settings.firebase_storage_bucket or os.getenv('FIREBASE_STORAGE_BUCKET')
+                
+                # Inicializar Firebase Admin SDK con Storage bucket
+                firebase_admin.initialize_app(cred, {
+                    'storageBucket': storage_bucket
+                })
                 
                 # Obtener instancia de Firestore
                 self.db = firestore.client()
                 
+                # Obtener instancia de Storage
+                self.bucket = storage.bucket()
+                
                 FirebaseService._initialized = True
                 print("✅ Firebase inicializado correctamente")
+                print(f"✅ Storage bucket: {storage_bucket}")
                 
             except Exception as e:
                 print(f"❌ Error al inicializar Firebase: {str(e)}")
@@ -54,6 +63,10 @@ class FirebaseService:
     def get_auth(self):
         """Retorna módulo de autenticación de Firebase"""
         return auth
+    
+    def get_bucket(self):
+        """Retorna instancia del Storage bucket"""
+        return self.bucket
 
 # Crear instancia global
 firebase_service = FirebaseService()

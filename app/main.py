@@ -1,10 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
-from app.routers import auth, profile
+from app.routers import auth, profile, posts
 from app.config import settings
 from dotenv import load_dotenv
-import os
 
 # Cargar variables de entorno
 load_dotenv()
@@ -39,6 +38,7 @@ app.add_middleware(
 # Incluir routers
 app.include_router(auth.router)
 app.include_router(profile.router)
+app.include_router(posts.router)
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -48,7 +48,12 @@ async def root():
         "version": settings.api_version,
         "status": "running",
         "docs": "/docs",
-        "environment": os.getenv("ENVIRONMENT", "production")
+        "features": [
+            "Authentication (Register/Login/Logout)",
+            "User Profiles",
+            "Posts with Auto-Moderation",
+            "Image Upload to Firebase Storage"
+        ]
     }
 
 @app.get("/health", tags=["Health"])
@@ -56,14 +61,25 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "service": "auth-service"
+        "service": "edel-socialapp-api",
+        "features": {
+            "auth": "enabled",
+            "profile": "enabled",
+            "posts": "enabled",
+            "moderation": "enabled"
+        }
     }
 
 # Event handlers
 @app.on_event("startup")
 async def startup_event():
     print("🚀 Iniciando Edel-SocialApp API...")
-    print(f"📚 Documentación disponible en: /docs")
+    print(f"📚 Documentación disponible en: http://localhost:8000/docs")
+    print("✅ Características habilitadas:")
+    print("   - Autenticación con JWT")
+    print("   - Perfiles de usuario")
+    print("   - Posts con moderación automática")
+    print("   - Upload de imágenes a Firebase Storage")
 
 @app.on_event("shutdown")
 async def shutdown_event():
