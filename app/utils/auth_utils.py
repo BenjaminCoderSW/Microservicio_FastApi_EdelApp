@@ -9,7 +9,7 @@ token_blacklist = set()
 
 def create_access_token(data: dict) -> str:
     """
-    Crear token JWT
+    Crear token JWT SIN EXPIRACIÓN
     
     Args:
         data: Datos a incluir en el token
@@ -18,8 +18,9 @@ def create_access_token(data: dict) -> str:
         Token JWT como string
     """
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(hours=settings.jwt_expiration_hours)
-    to_encode.update({"exp": expire})
+    # MEJOR YA NO SE AGREGA LA FECHA DE EXPIRACION  DE TOKEN PARA PRUEBAS MAS FACILES
+    # expire = datetime.utcnow() + timedelta(hours=settings.jwt_expiration_hours)
+    #to_encode.update({"exp": expire})
     
     encoded_jwt = jwt.encode(
         to_encode, 
@@ -40,27 +41,30 @@ def verify_token(token: str) -> dict:
         Payload del token decodificado
         
     Raises:
-        HTTPException: Si el token es inválido o expirado
+        HTTPException: Si el token es inválido
     """
     # Verificar si está en blacklist
     if token in token_blacklist:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido o expirado"
+            detail="Token inválido"
         )
     
     try:
+        # MODIFICADO: Se desactiva la verificación de expiración
         payload = jwt.decode(
             token, 
             settings.jwt_secret_key, 
-            algorithms=[settings.jwt_algorithm]
+            algorithms=[settings.jwt_algorithm],
+            options={"verify_exp": False}  # AGREGADO: Desactiva verificación de expiración de token
         )
         return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expirado"
-        )
+    # REMOVIDO YA QUE SE QUISO DESACTIVAR LA EXPIRACION DEL TOKEN
+    # except jwt.ExpiredSignatureError:
+    #     raise HTTPException(
+    #         status_code=status.HTTP_401_UNAUTHORIZED,
+    #         detail="Token expirado"
+    #     )
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
