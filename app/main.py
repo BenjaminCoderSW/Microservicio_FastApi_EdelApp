@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
-from app.routers import auth, profile, posts
+from app.routers import auth, profile, posts, likes, comments, reports
 from app.config import settings
 from dotenv import load_dotenv
 
@@ -39,6 +39,9 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(profile.router)
 app.include_router(posts.router)
+app.include_router(likes.router)
+app.include_router(comments.router)
+app.include_router(reports.router)
 
 @app.get("/", tags=["Root"])
 async def root():
