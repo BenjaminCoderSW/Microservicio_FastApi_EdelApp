@@ -202,30 +202,33 @@ async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
             detail=f"Error al cerrar sesión: {str(e)}"
         )
 
+# AGREGAR ESTE ENDPOINT AL ARCHIVO app/routers/auth.py
+
 @router.delete("/account", status_code=status.HTTP_200_OK)
 async def delete_account(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """
-    Eliminar cuenta de usuario (USUARIO AUTENTICADO)
+    Eliminar cuenta del usuario autenticado
     
     - Elimina el usuario de Firebase Authentication
     - Elimina el documento del usuario en Firestore (colección 'users')
-    - Invalida el token actual
-    - Esta acción es IRREVERSIBLE
+    - Elimina todos los posts creados por el usuario (colección 'posts')
+    - Invalida el token JWT del usuario
     
     **Header requerido:**
     - Authorization: Bearer {token}
     
     **Respuesta:**
-    - Mensaje de confirmación de eliminación exitosa
+    - Mensaje de confirmación
     
-    **NOTA IMPORTANTE:**
-    - Esta acción eliminará permanentemente la cuenta del usuario
-    - Se recomienda agregar confirmación en el frontend antes de llamar este endpoint
+    **NOTA:** Esta acción es irreversible y eliminará permanentemente:
+    - La cuenta del usuario
+    - Todos los posts creados por el usuario
+    - El acceso con el token actual
     """
     try:
-        # Verificar token y obtener usuario actual
+        # Verificar token
         token = credentials.credentials
         current_user = verify_token(token)
         user_id = current_user['uid']
@@ -234,40 +237,51 @@ async def delete_account(
         
         db = firebase_service.get_db()
         
-        # 1. VERIFICAR QUE EL USUARIO EXISTE EN FIRESTORE
+        # PASO 1: Verificar que el usuario existe
         user_doc = db.collection('users').document(user_id).get()
         if not user_doc.exists:
-            print(f"⚠️ Usuario no encontrado en Firestore: {user_id}")
-            # Aún así intentamos eliminar de Auth por si existe solo ahí
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Usuario no encontrado"
+            )
         
-        # 2. ELIMINAR DE FIREBASE AUTHENTICATION
+        user_data = user_doc.to_dict()
+        user_alias = user_data.get('alias', 'Usuario')
+        
+        # PASO 2: Eliminar todos los posts del usuario
+        posts_query = db.collection('posts').where('user_id', '==', user_id)
+        posts_docs = list(posts_query.stream())
+        posts_count = len(posts_docs)
+        
+        for post_doc in posts_docs:
+            post_doc.reference.delete()
+        
+        print(f"✅ Eliminados {posts_count} posts del usuario {user_id}")
+        
+        # PASO 3: Eliminar documento del usuario en Firestore
+        db.collection('users').document(user_id).delete()
+        print(f"✅ Documento de usuario eliminado de Firestore: {user_id}")
+        
+        # PASO 4: Eliminar usuario de Firebase Authentication
         try:
             auth.delete_user(user_id)
             print(f"✅ Usuario eliminado de Firebase Auth: {user_id}")
         except auth.UserNotFoundError:
-            print(f"⚠️ Usuario no encontrado en Firebase Auth: {user_id}")
-        except Exception as auth_error:
-            print(f"❌ Error al eliminar usuario de Auth: {str(auth_error)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error al eliminar usuario de Authentication: {str(auth_error)}"
-            )
+            print(f"⚠️ Usuario no encontrado en Firebase Auth (ya eliminado): {user_id}")
         
-        # 3. ELIMINAR DOCUMENTO DE FIRESTORE
-        if user_doc.exists:
-            db.collection('users').document(user_id).delete()
-            print(f"✅ Usuario eliminado de Firestore: {user_id}")
-        
-        # 4. INVALIDAR TOKEN ACTUAL
+        # PASO 5: Invalidar el token JWT
         invalidate_token(token)
-        print(f"✅ Token invalidado para usuario: {user_id}")
-        
-        print(f"🎉 Cuenta eliminada exitosamente: {user_id}")
+        print(f"✅ Token JWT invalidado para usuario: {user_id}")
         
         return {
-            "message": "Cuenta eliminada exitosamente",
+            "message": f"Cuenta de '{user_alias}' eliminada exitosamente",
             "user_id": user_id,
-            "deleted_at": datetime.utcnow().isoformat()
+            "posts_deleted": posts_count,
+            "details": {
+                "account_deleted": True,
+                "posts_deleted": posts_count,
+                "token_invalidated": True
+            }
         }
         
     except HTTPException:
