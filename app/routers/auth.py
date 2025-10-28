@@ -202,6 +202,83 @@ async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
             detail=f"Error al cerrar sesión: {str(e)}"
         )
 
+@router.delete("/account", status_code=status.HTTP_200_OK)
+async def delete_account(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Eliminar cuenta de usuario (USUARIO AUTENTICADO)
+    
+    - Elimina el usuario de Firebase Authentication
+    - Elimina el documento del usuario en Firestore (colección 'users')
+    - Invalida el token actual
+    - Esta acción es IRREVERSIBLE
+    
+    **Header requerido:**
+    - Authorization: Bearer {token}
+    
+    **Respuesta:**
+    - Mensaje de confirmación de eliminación exitosa
+    
+    **NOTA IMPORTANTE:**
+    - Esta acción eliminará permanentemente la cuenta del usuario
+    - Se recomienda agregar confirmación en el frontend antes de llamar este endpoint
+    """
+    try:
+        # Verificar token y obtener usuario actual
+        token = credentials.credentials
+        current_user = verify_token(token)
+        user_id = current_user['uid']
+        
+        print(f"🗑️ Iniciando eliminación de cuenta para usuario: {user_id}")
+        
+        db = firebase_service.get_db()
+        
+        # 1. VERIFICAR QUE EL USUARIO EXISTE EN FIRESTORE
+        user_doc = db.collection('users').document(user_id).get()
+        if not user_doc.exists:
+            print(f"⚠️ Usuario no encontrado en Firestore: {user_id}")
+            # Aún así intentamos eliminar de Auth por si existe solo ahí
+        
+        # 2. ELIMINAR DE FIREBASE AUTHENTICATION
+        try:
+            auth.delete_user(user_id)
+            print(f"✅ Usuario eliminado de Firebase Auth: {user_id}")
+        except auth.UserNotFoundError:
+            print(f"⚠️ Usuario no encontrado en Firebase Auth: {user_id}")
+        except Exception as auth_error:
+            print(f"❌ Error al eliminar usuario de Auth: {str(auth_error)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error al eliminar usuario de Authentication: {str(auth_error)}"
+            )
+        
+        # 3. ELIMINAR DOCUMENTO DE FIRESTORE
+        if user_doc.exists:
+            db.collection('users').document(user_id).delete()
+            print(f"✅ Usuario eliminado de Firestore: {user_id}")
+        
+        # 4. INVALIDAR TOKEN ACTUAL
+        invalidate_token(token)
+        print(f"✅ Token invalidado para usuario: {user_id}")
+        
+        print(f"🎉 Cuenta eliminada exitosamente: {user_id}")
+        
+        return {
+            "message": "Cuenta eliminada exitosamente",
+            "user_id": user_id,
+            "deleted_at": datetime.utcnow().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error al eliminar cuenta: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al eliminar cuenta: {str(e)}"
+        )
+
 @router.get("/me")
 async def get_current_user_info(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """
