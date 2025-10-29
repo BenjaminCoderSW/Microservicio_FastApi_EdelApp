@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
-from app.routers import auth, profile, posts, likes, comments, reports
+from app.routers import auth, profile, posts, likes, comments, reports, notifications
 from app.config import settings
 from dotenv import load_dotenv
 
@@ -42,6 +42,7 @@ app.include_router(posts.router)
 app.include_router(likes.router)
 app.include_router(comments.router)
 app.include_router(reports.router)
+app.include_router(notifications.router)  # NUEVO: Router de notificaciones
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -55,7 +56,10 @@ async def root():
             "Authentication (Register/Login/Logout)",
             "User Profiles",
             "Posts with Auto-Moderation",
-            "Image Upload to Firebase Storage"
+            "Image Upload to Firebase Storage",
+            "Likes & Comments",
+            "Reports & Admin Moderation",
+            "Push Notifications (FCM HTTP v1)"  # NUEVO
         ]
     }
 
@@ -69,7 +73,11 @@ async def health_check():
             "auth": "enabled",
             "profile": "enabled",
             "posts": "enabled",
-            "moderation": "enabled"
+            "moderation": "enabled",
+            "likes": "enabled",
+            "comments": "enabled",
+            "reports": "enabled",
+            "notifications": "enabled"  # NUEVO
         }
     }
 
@@ -83,6 +91,9 @@ async def startup_event():
     print("   - Perfiles de usuario")
     print("   - Posts con moderación automática")
     print("   - Upload de imágenes a Firebase Storage")
+    print("   - Likes y comentarios")
+    print("   - Sistema de reportes")
+    print("   - Notificaciones Push (FCM HTTP v1)")  # NUEVO
 
 @app.on_event("shutdown")
 async def shutdown_event():

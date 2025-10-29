@@ -17,7 +17,10 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     sightengine_api_user: Optional[str] = None
     sightengine_api_secret: Optional[str] = None
-    # PurgoMalum no requiere API key (es gratuito)
+    
+    # FCM - No necesitamos Server Key, Admin SDK maneja HTTP v1
+    # Sender ID de FCM (para referencia)
+    fcm_sender_id: Optional[str] = "878232540597"
     
     # API
     api_title: str = "Edel-SocialApp API"
