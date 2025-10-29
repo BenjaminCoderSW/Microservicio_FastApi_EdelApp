@@ -6,6 +6,7 @@ from app.models.interactions import (
     CommentListResponse
 )
 from app.services.firebase_service import firebase_service
+from app.services.fcm_service import fcm_service
 from app.utils.auth_utils import verify_token
 from datetime import datetime
 import uuid
@@ -27,6 +28,7 @@ async def create_comment(
     - Incrementa contador comments_count en el post
     - Valida longitud del comentario (1-500 caracteres)
     - Valida que el post existe
+    - **NUEVO: Envía notificación push al autor del post**
     
     **Header requerido:**
     - Authorization: Bearer {token}
@@ -96,6 +98,28 @@ async def create_comment(
         })
         
         print(f"✅ Comentario creado: {comment_id} en post {post_id}")
+        
+        # 5. ENVIAR NOTIFICACIÓN PUSH AL AUTOR DEL POST (si no es el mismo usuario)
+        post_author_id = post_data.get('user_id')
+        if post_author_id and post_author_id != user_id:
+            try:
+                # Enviar notificación
+                fcm_service.send_notification_to_user(
+                    user_id=post_author_id,
+                    title="💬 Nuevo comentario en tu post",
+                    body=f"{alias} comentó: {request.content[:50]}{'...' if len(request.content) > 50 else ''}",
+                    data={
+                        "type": "comment",
+                        "post_id": post_id,
+                        "comment_id": comment_id,
+                        "user_id": user_id
+                    },
+                    notification_type="comment"
+                )
+                print(f"📤 Notificación de comentario enviada a {post_author_id}")
+            except Exception as notif_error:
+                # No fallar si la notificación falla
+                print(f"⚠️ Error al enviar notificación de comentario: {str(notif_error)}")
         
         return CommentResponse(
             comment_id=comment_id,

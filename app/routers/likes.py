@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.models.interactions import LikeResponse, LikeStatus
 from app.services.firebase_service import firebase_service
+from app.services.fcm_service import fcm_service
 from app.utils.auth_utils import verify_token
 from datetime import datetime
 import uuid
@@ -21,6 +22,7 @@ async def like_post(
     - Incrementa contador likes_count en el post
     - Valida que el usuario no haya dado like previamente
     - Valida que el post existe
+    - **NUEVO: Envía notificación push al autor del post**
     
     **Header requerido:**
     - Authorization: Bearer {token}
@@ -93,6 +95,31 @@ async def like_post(
         })
         
         print(f"✅ Like agregado: user={user_id}, post={post_id}")
+        
+        # 5. ENVIAR NOTIFICACIÓN PUSH AL AUTOR DEL POST (si no es el mismo usuario)
+        post_author_id = post_data.get('user_id')
+        if post_author_id and post_author_id != user_id:
+            try:
+                # Obtener alias del usuario que dio like
+                user_doc = db.collection('users').document(user_id).get()
+                user_alias = user_doc.to_dict().get('alias', 'Alguien') if user_doc.exists else 'Alguien'
+                
+                # Enviar notificación
+                fcm_service.send_notification_to_user(
+                    user_id=post_author_id,
+                    title="❤️ Nuevo like en tu post",
+                    body=f"A {user_alias} le gustó tu post",
+                    data={
+                        "type": "like",
+                        "post_id": post_id,
+                        "user_id": user_id
+                    },
+                    notification_type="like"
+                )
+                print(f"📤 Notificación de like enviada a {post_author_id}")
+            except Exception as notif_error:
+                # No fallar si la notificación falla
+                print(f"⚠️ Error al enviar notificación de like: {str(notif_error)}")
         
         return LikeResponse(
             message="Like agregado exitosamente",
