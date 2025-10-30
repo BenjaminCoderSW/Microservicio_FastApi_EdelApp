@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
-from fastapi import HTTPException, status, Header
+from fastapi import HTTPException, status, Header, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
 from app.config import settings
 
@@ -109,3 +110,28 @@ def invalidate_token(token: str) -> None:
         token: Token JWT a invalidar
     """
     token_blacklist.add(token)
+    
+# Crear instancia de HTTPBearer que no lanza error si falta
+security_optional = HTTPBearer(auto_error=False)
+
+async def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional)
+) -> Optional[dict]:
+    """
+    Dependency para obtener usuario actual de forma OPCIONAL
+    
+    Args:
+        credentials: Credenciales Bearer token (opcional)
+        
+    Returns:
+        Payload del token con información del usuario, o None si no hay token
+    """
+    if not credentials:
+        return None
+    
+    try:
+        token = credentials.credentials
+        return verify_token(token)
+    except:
+        # Si el token es inválido, retornar None en lugar de error
+        return None
