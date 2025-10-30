@@ -39,6 +39,7 @@ class PostResponse(BaseModel):
     likes_count: int = 0
     comments_count: int = 0
     is_deleted: bool = False
+    user_liked: Optional[bool] = None  # NUEVO: indica si el usuario actual dio like
     
     class Config:
         json_schema_extra = {
@@ -51,7 +52,8 @@ class PostResponse(BaseModel):
                 "created_at": "2024-10-21T10:30:00",
                 "likes_count": 5,
                 "comments_count": 2,
-                "is_deleted": False
+                "is_deleted": False,
+                "user_liked": True  # NUEVO
             }
         }
 

@@ -9,7 +9,7 @@ from app.models.post import (
 from app.services.firebase_service import firebase_service
 from app.services.moderation_service import moderation_service
 from app.services.storage_service import storage_service
-from app.utils.auth_utils import verify_token
+from app.utils.auth_utils import verify_token, get_current_user_optional
 from datetime import datetime
 from typing import Optional
 import uuid
@@ -244,12 +244,14 @@ async def create_post_with_image(
 @router.get("/", response_model=PostListResponse)
 async def get_posts_feed(
     page: int = Query(1, ge=1, description="Número de página"),
-    page_size: int = Query(20, ge=1, le=100, description="Posts por página")
+    page_size: int = Query(20, ge=1, le=100, description="Posts por página"),
+    current_user: Optional[dict] = Depends(get_current_user_optional)
 ):
     """
     Obtener feed de posts
     
-    - Endpoint público (no requiere autenticación)
+    - Endpoint público pero puede recibir token opcional
+    - Si el usuario está autenticado, incluye el estado de like (user_liked)
     - Retorna posts ordenados por fecha (más recientes primero)
     - Paginación incluida
     - No incluye posts eliminados
@@ -257,8 +259,19 @@ async def get_posts_feed(
     **Parámetros:**
     - page: Número de página (default: 1)
     - page_size: Posts por página (default: 20, max: 100)
+    
+    **Header opcional:**
+    - Authorization: Bearer {token} (para incluir estado de likes)
     """
     try:
+        # Obtener user_id si está autenticado
+        current_user_id = current_user['uid'] if current_user else None
+        
+        if current_user_id:
+            print(f"✅ Usuario autenticado en feed: {current_user_id}")
+        else:
+            print(f"ℹ️ Usuario no autenticado en feed (público)")
+        
         db = firebase_service.get_db()
         
         # Query base: posts no eliminados, ordenados por fecha descendente
@@ -274,10 +287,27 @@ async def get_posts_feed(
         # Obtener posts de la página actual
         posts_page = all_posts[offset:offset + page_size]
         
+        # Si el usuario está autenticado, obtener todos sus likes de una sola vez
+        user_likes_set = set()
+        if current_user_id:
+            try:
+                likes_query = db.collection('likes').where('user_id', '==', current_user_id).stream()
+                user_likes_set = {like_doc.to_dict()['post_id'] for like_doc in likes_query}
+                print(f"✅ Likes del usuario obtenidos: {len(user_likes_set)} likes")
+            except Exception as e:
+                print(f"⚠️ Error al obtener likes del usuario: {str(e)}")
+        
         # Convertir a PostResponse
         posts_list = []
         for post_doc in posts_page:
             post_data = post_doc.to_dict()
+            
+            # Determinar si el usuario dio like a este post
+            user_liked = None
+            if current_user_id:
+                user_liked = post_data['post_id'] in user_likes_set
+                print(f"  Post {post_data['post_id'][:8]}... user_liked={user_liked}")
+            
             posts_list.append(PostResponse(
                 post_id=post_data['post_id'],
                 user_id=post_data['user_id'],
@@ -287,7 +317,8 @@ async def get_posts_feed(
                 created_at=post_data['created_at'],
                 likes_count=post_data.get('likes_count', 0),
                 comments_count=post_data.get('comments_count', 0),
-                is_deleted=post_data.get('is_deleted', False)
+                is_deleted=post_data.get('is_deleted', False),
+                user_liked=user_liked
             ))
         
         # Verificar si hay más páginas
@@ -305,24 +336,42 @@ async def get_posts_feed(
         
     except Exception as e:
         print(f"❌ Error al obtener feed: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al obtener feed: {str(e)}"
         )
 
+
 @router.get("/{post_id}", response_model=PostResponse)
-async def get_post_by_id(post_id: str):
+async def get_post_by_id(
+    post_id: str,
+    current_user: Optional[dict] = Depends(get_current_user_optional)
+):
     """
     Obtener post individual por ID
     
-    - Endpoint público (no requiere autenticación)
+    - Endpoint público pero puede recibir token opcional
+    - Si el usuario está autenticado, incluye el estado de like
     - Retorna detalles completos del post
     - Incluye contadores de likes y comentarios
     
     **Parámetros:**
     - post_id: ID del post a obtener
+    
+    **Header opcional:**
+    - Authorization: Bearer {token} (para incluir estado de like)
     """
     try:
+        # Obtener user_id si está autenticado
+        current_user_id = current_user['uid'] if current_user else None
+        
+        if current_user_id:
+            print(f"✅ Usuario autenticado consultando post: {current_user_id}")
+        else:
+            print(f"ℹ️ Usuario no autenticado consultando post")
+        
         db = firebase_service.get_db()
         
         # Obtener post
@@ -343,6 +392,20 @@ async def get_post_by_id(post_id: str):
                 detail="Post no encontrado"
             )
         
+        # Verificar si el usuario dio like
+        user_liked = None
+        if current_user_id:
+            try:
+                likes_query = db.collection('likes')\
+                    .where('post_id', '==', post_id)\
+                    .where('user_id', '==', current_user_id)\
+                    .limit(1)\
+                    .get()
+                user_liked = len(list(likes_query)) > 0
+                print(f"✅ Like check: post={post_id[:8]}..., user_liked={user_liked}")
+            except Exception as e:
+                print(f"⚠️ Error al verificar like: {str(e)}")
+        
         print(f"✅ Post obtenido: {post_id}")
         
         return PostResponse(
@@ -354,13 +417,16 @@ async def get_post_by_id(post_id: str):
             created_at=post_data['created_at'],
             likes_count=post_data.get('likes_count', 0),
             comments_count=post_data.get('comments_count', 0),
-            is_deleted=post_data.get('is_deleted', False)
+            is_deleted=post_data.get('is_deleted', False),
+            user_liked=user_liked
         )
         
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ Error al obtener post: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al obtener post: {str(e)}"
