@@ -33,26 +33,34 @@ class FCMService:
             Dict con resultado del envío
         """
         try:
+            # IMPORTANTE: Asegurar que data tenga el tipo de notificación
+            notification_data = data if data else {}
+            notification_data['type'] = notification_type  # CRUCIAL para routing en frontend
+            
             # Construir mensaje según FCM HTTP v1
             message = messaging.Message(
                 notification=messaging.Notification(
                     title=title,
                     body=body,
                 ),
-                data=data if data else {},
+                data=notification_data,  # Los datos van aquí (NO en notification)
                 token=fcm_token,
                 android=messaging.AndroidConfig(
                     priority='high',
+                    # REMOVIDO: click_action (Ali tiene razón, esto puede causar problemas)
                     notification=messaging.AndroidNotification(
                         sound='default',
-                        click_action='FLUTTER_NOTIFICATION_CLICK'
+                        # El channel_id ayuda a categorizar notificaciones
+                        channel_id='edel_notifications'
                     )
                 ),
                 apns=messaging.APNSConfig(
                     payload=messaging.APNSPayload(
                         aps=messaging.Aps(
                             sound='default',
-                            badge=1
+                            badge=1,
+                            # Para iOS, los datos deben estar aquí también
+                            custom_data=notification_data
                         )
                     )
                 )
