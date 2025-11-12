@@ -20,7 +20,10 @@ class FCMService:
         notification_type: str = "general"
     ) -> Dict:
         """
-        Enviar notificación push a un dispositivo específico usando HTTP v1
+        Enviar notificación push DATA-ONLY a un dispositivo específico
+        
+        IMPORTANTE: Este método envía SOLO data (sin notification object)
+        para que el frontend de Ali maneje completamente la notificación.
         
         Args:
             fcm_token: Token FCM del dispositivo
@@ -33,35 +36,30 @@ class FCMService:
             Dict con resultado del envío
         """
         try:
-            # Construir mensaje según FCM HTTP v1
+            # Preparar data payload con TODA la información
+            notification_data = data if data else {}
+            notification_data["title"] = title
+            notification_data["body"] = body
+            notification_data["type"] = notification_type
+            notification_data["click_action"] = "OPEN_POST"  # Ali lo usará para navegar
+            notification_data["timestamp"] = str(int(datetime.utcnow().timestamp()))
+            
+            # Construir mensaje DATA-ONLY (sin notification object)
+            # Esto garantiza que SIEMPRE llegue a onMessageReceived() en Android
             message = messaging.Message(
-                notification=messaging.Notification(
-                    title=title,
-                    body=body,
-                ),
-                data=data if data else {},
+                data=notification_data,  # SOLO data, sin notification
                 token=fcm_token,
                 android=messaging.AndroidConfig(
                     priority='high',
-                    notification=messaging.AndroidNotification(
-                        sound='default',
-                        click_action='FLUTTER_NOTIFICATION_CLICK'
-                    )
-                ),
-                apns=messaging.APNSConfig(
-                    payload=messaging.APNSPayload(
-                        aps=messaging.Aps(
-                            sound='default',
-                            badge=1
-                        )
-                    )
+                    # TTL (Time To Live) - la notificación expira en 24 horas si no se entrega
+                    ttl=datetime.timedelta(hours=24)
                 )
             )
             
             # Enviar mensaje con Firebase Admin SDK (usa HTTP v1 automáticamente)
             response = messaging.send(message)
             
-            print(f"✅ Notificación enviada exitosamente: {response}")
+            print(f"✅ Notificación data-only enviada exitosamente: {response}")
             
             return {
                 "success": True,
@@ -113,9 +111,9 @@ class FCMService:
             Dict con resultado del envío
         """
         try:
-            # SIEMPRE guardar notificación en Firestore PRIMERO (historial)
+            # PASO 1: SIEMPRE guardar notificación en Firestore PRIMERO (historial)
             notification_id = str(uuid.uuid4())
-            notification_data = {
+            notification_data_db = {
                 'notification_id': notification_id,
                 'user_id': user_id,
                 'title': title,
@@ -126,10 +124,10 @@ class FCMService:
                 'is_read': False
             }
             
-            self.db.collection('notifications').document(notification_id).set(notification_data)
+            self.db.collection('notifications').document(notification_id).set(notification_data_db)
             print(f"✅ Notificación guardada en Firestore: {notification_id}")
             
-            # Intentar obtener FCM token del usuario desde Firestore
+            # PASO 2: Intentar obtener FCM token del usuario desde Firestore
             user_doc = self.db.collection('users').document(user_id).get()
             
             if not user_doc.exists:
@@ -151,7 +149,7 @@ class FCMService:
                     "notification_id": notification_id
                 }
             
-            # Enviar notificación push
+            # PASO 3: Enviar notificación push DATA-ONLY
             push_result = self.send_notification(
                 fcm_token=fcm_token,
                 title=title,
@@ -161,9 +159,9 @@ class FCMService:
             )
             
             if push_result["success"]:
-                print(f"✅ Notificación push enviada exitosamente")
+                print(f"✅ Notificación push DATA-ONLY enviada exitosamente a {user_id}")
             else:
-                print(f"⚠️ Push falló pero notificación guardada en Firestore")
+                print(f"⚠️ Push falló pero notificación guardada en Firestore para {user_id}")
             
             return {
                 "success": True,
@@ -187,7 +185,7 @@ class FCMService:
         data: Optional[Dict[str, str]] = None
     ) -> Dict:
         """
-        Enviar notificación a un topic (grupo de usuarios suscritos)
+        Enviar notificación DATA-ONLY a un topic (grupo de usuarios suscritos)
         
         Args:
             topic: Nombre del topic
@@ -199,18 +197,24 @@ class FCMService:
             Dict con resultado del envío
         """
         try:
+            # Preparar data payload
+            notification_data = data if data else {}
+            notification_data["title"] = title
+            notification_data["body"] = body
+            notification_data["timestamp"] = str(int(datetime.utcnow().timestamp()))
+            
+            # Mensaje data-only
             message = messaging.Message(
-                notification=messaging.Notification(
-                    title=title,
-                    body=body,
-                ),
-                data=data if data else {},
+                data=notification_data,
                 topic=topic,
+                android=messaging.AndroidConfig(
+                    priority='high'
+                )
             )
             
             response = messaging.send(message)
             
-            print(f"✅ Notificación enviada al topic '{topic}': {response}")
+            print(f"✅ Notificación data-only enviada al topic '{topic}': {response}")
             
             return {
                 "success": True,
