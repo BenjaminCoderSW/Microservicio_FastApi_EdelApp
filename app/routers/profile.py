@@ -39,15 +39,33 @@ class ProfileResponse(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     """Modelo para actualizar perfil"""
-    alias: Optional[str] = Field(None, min_length=3, max_length=20, description="Nuevo alias (opcional)")
+    alias: Optional[str] = Field(None, min_length=3, max_length=50, description="Nuevo alias (opcional)")
     profile_image: Optional[str] = Field(None, description="URL de imagen de perfil (opcional)")
     fcm_token: Optional[str] = Field(None, description="Token FCM del dispositivo para notificaciones push (opcional)")
     
     @validator('alias')
     def validate_alias(cls, v):
         if v is not None:
-            if not v.replace('_', '').replace('-', '').isalnum():
-                raise ValueError('El alias solo puede contener letras, números, guiones y guiones bajos')
+            # Eliminar espacios al inicio y final
+            v = v.strip()
+            
+            # Validar longitud después de eliminar espacios
+            if len(v) < 3:
+                raise ValueError('El alias debe tener al menos 3 caracteres')
+            if len(v) > 50:
+                raise ValueError('El alias no puede tener más de 50 caracteres')
+            
+            # Permitir letras, números, espacios, guiones y guiones bajos
+            # Remover espacios temporalmente para validar caracteres
+            alias_sin_espacios = v.replace(' ', '').replace('_', '').replace('-', '')
+            
+            if not alias_sin_espacios.isalnum():
+                raise ValueError('El alias solo puede contener letras, números, espacios, guiones y guiones bajos')
+            
+            # No permitir espacios múltiples consecutivos
+            if '  ' in v:
+                raise ValueError('El alias no puede tener espacios múltiples consecutivos')
+        
         return v
     
     @validator('profile_image')
@@ -69,7 +87,7 @@ class UpdateProfileRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "alias": "NuevoAlias",
+                "alias": "Nuevo Alias Con Espacios",
                 "profile_image": "https://storage.googleapis.com/bucket/image.jpg",
                 "fcm_token": "dXpZL3J2k4zNhMw1hGkhYb4lrZRki1FuCbNLGAvSh8dXpZL3..."
             }
@@ -221,9 +239,10 @@ async def update_my_profile(
     - Permite actualizar alias, foto de perfil y FCM token
     - Solo el usuario autenticado puede actualizar su propio perfil
     - Todos los campos son opcionales
+    - **IMPORTANTE: Alias puede contener espacios, números, guiones y guiones bajos**
     
     **Campos actualizables:**
-    - alias: Nuevo nombre de usuario (3-20 caracteres)
+    - alias: Nuevo nombre de usuario (3-50 caracteres, permite espacios)
     - profile_image: URL de nueva imagen de perfil
     - fcm_token: Token FCM del dispositivo para notificaciones push
     
