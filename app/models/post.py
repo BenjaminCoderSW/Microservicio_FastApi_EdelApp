@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 
 class CreatePostRequest(BaseModel):
@@ -35,11 +35,11 @@ class PostResponse(BaseModel):
     alias: str
     content: str
     image_url: Optional[str] = None
-    created_at: datetime
+    created_at: str  # CAMBIADO: Ahora es string formateado en lugar de datetime
     likes_count: int = 0
     comments_count: int = 0
     is_deleted: bool = False
-    user_liked: Optional[bool] = None  # NUEVO: indica si el usuario actual dio like
+    user_liked: Optional[bool] = None
     
     class Config:
         json_schema_extra = {
@@ -49,11 +49,11 @@ class PostResponse(BaseModel):
                 "alias": "UsuarioAnonimo",
                 "content": "Este es mi primer post!",
                 "image_url": "https://storage.googleapis.com/bucket/image.jpg",
-                "created_at": "2024-10-21T10:30:00",
+                "created_at": "12 de noviembre de 2025, 1:30 PM",  # ACTUALIZADO: Formato amigable
                 "likes_count": 5,
                 "comments_count": 2,
                 "is_deleted": False,
-                "user_liked": True  # NUEVO
+                "user_liked": True
             }
         }
 

@@ -13,9 +13,68 @@ from app.utils.auth_utils import verify_token, get_current_user_optional
 from datetime import datetime
 from typing import Optional
 import uuid
+import pytz
 
 router = APIRouter(prefix="/posts", tags=["Posts"])
 security = HTTPBearer()
+
+# FUNCIÓN CORREGIDA PARA FORMATEAR FECHAS
+def format_datetime_mexico(dt: datetime) -> str:
+    """
+    Formatea datetime a formato amigable en español con zona horaria de México
+    
+    Args:
+        dt: datetime objeto (debe estar en UTC)
+        
+    Returns:
+        String formateado como: "12 de noviembre de 2025, 1:30 PM"
+    """
+    # Definir zona horaria de México
+    mexico_tz = pytz.timezone('America/Mexico_City')
+    utc_tz = pytz.UTC
+    
+    # Si el datetime es naive (sin timezone), lo tratamos como UTC
+    if dt.tzinfo is None:
+        dt = utc_tz.localize(dt)
+    
+    # Convertir a zona horaria de México
+    dt_mexico = dt.astimezone(mexico_tz)
+    
+    # Nombres de meses en español
+    meses = {
+        1: 'enero', 2: 'febrero', 3: 'marzo', 4: 'abril',
+        5: 'mayo', 6: 'junio', 7: 'julio', 8: 'agosto',
+        9: 'septiembre', 10: 'octubre', 11: 'noviembre', 12: 'diciembre'
+    }
+    
+    # Formatear fecha
+    dia = dt_mexico.day
+    mes = meses[dt_mexico.month]
+    anio = dt_mexico.year
+    
+    # Formatear hora (12 horas con AM/PM)
+    hora = dt_mexico.hour
+    minuto = dt_mexico.minute
+    
+    # Convertir a formato 12 horas
+    if hora == 0:
+        hora_12 = 12
+        periodo = 'AM'
+    elif hora < 12:
+        hora_12 = hora
+        periodo = 'AM'
+    elif hora == 12:
+        hora_12 = 12
+        periodo = 'PM'
+    else:
+        hora_12 = hora - 12
+        periodo = 'PM'
+    
+    # Formatear con ceros a la izquierda en minutos
+    hora_formateada = f"{hora_12}:{minuto:02d} {periodo}"
+    
+    return f"{dia} de {mes} de {anio}, {hora_formateada}"
+
 
 @router.post("/", response_model=CreatePostResponse, status_code=status.HTTP_201_CREATED)
 async def create_post(
@@ -255,6 +314,7 @@ async def get_posts_feed(
     - Retorna posts ordenados por fecha (más recientes primero)
     - Paginación incluida
     - No incluye posts eliminados
+    - **NUEVO: Fecha formateada en español para México**
     
     **Parámetros:**
     - page: Número de página (default: 1)
@@ -297,7 +357,7 @@ async def get_posts_feed(
             except Exception as e:
                 print(f"⚠️ Error al obtener likes del usuario: {str(e)}")
         
-        # Convertir a PostResponse
+        # Convertir a PostResponse con fecha formateada
         posts_list = []
         for post_doc in posts_page:
             post_data = post_doc.to_dict()
@@ -306,20 +366,27 @@ async def get_posts_feed(
             user_liked = None
             if current_user_id:
                 user_liked = post_data['post_id'] in user_likes_set
-                print(f"  Post {post_data['post_id'][:8]}... user_liked={user_liked}")
             
-            posts_list.append(PostResponse(
+            # FORMATEAR FECHA PARA MÉXICO
+            created_at_formatted = format_datetime_mexico(post_data['created_at'])
+            
+            # DEBUG: Imprimir hora original y convertida
+            print(f"📅 Post {post_data['post_id'][:8]}... - UTC: {post_data['created_at']} -> México: {created_at_formatted}")
+            
+            # Crear respuesta con fecha como string formateado
+            post_response = PostResponse(
                 post_id=post_data['post_id'],
                 user_id=post_data['user_id'],
                 alias=post_data['alias'],
                 content=post_data['content'],
                 image_url=post_data.get('image_url'),
-                created_at=post_data['created_at'],
+                created_at=created_at_formatted,
                 likes_count=post_data.get('likes_count', 0),
                 comments_count=post_data.get('comments_count', 0),
                 is_deleted=post_data.get('is_deleted', False),
                 user_liked=user_liked
-            ))
+            )
+            posts_list.append(post_response)
         
         # Verificar si hay más páginas
         has_more = (offset + page_size) < total
@@ -343,7 +410,6 @@ async def get_posts_feed(
             detail=f"Error al obtener feed: {str(e)}"
         )
 
-
 @router.get("/{post_id}", response_model=PostResponse)
 async def get_post_by_id(
     post_id: str,
@@ -356,6 +422,7 @@ async def get_post_by_id(
     - Si el usuario está autenticado, incluye el estado de like
     - Retorna detalles completos del post
     - Incluye contadores de likes y comentarios
+    - **NUEVO: Fecha formateada en español para México**
     
     **Parámetros:**
     - post_id: ID del post a obtener
@@ -406,6 +473,9 @@ async def get_post_by_id(
             except Exception as e:
                 print(f"⚠️ Error al verificar like: {str(e)}")
         
+        # FORMATEAR FECHA PARA MÉXICO
+        created_at_formatted = format_datetime_mexico(post_data['created_at'])
+        
         print(f"✅ Post obtenido: {post_id}")
         
         return PostResponse(
@@ -414,7 +484,7 @@ async def get_post_by_id(
             alias=post_data['alias'],
             content=post_data['content'],
             image_url=post_data.get('image_url'),
-            created_at=post_data['created_at'],
+            created_at=created_at_formatted,
             likes_count=post_data.get('likes_count', 0),
             comments_count=post_data.get('comments_count', 0),
             is_deleted=post_data.get('is_deleted', False),
