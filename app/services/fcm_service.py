@@ -22,9 +22,6 @@ class FCMService:
         """
         Enviar notificación push a un dispositivo específico usando HTTP v1
         
-        IMPORTANTE: Ahora enviamos todo en el campo 'data' (incluyendo title y body)
-        para que Ali pueda manejar las notificaciones más fácilmente en Android.
-        
         Args:
             fcm_token: Token FCM del dispositivo
             title: Título de la notificación
@@ -36,23 +33,24 @@ class FCMService:
             Dict con resultado del envío
         """
         try:
-            # ✅ CAMBIO PRINCIPAL: Poner todo en data (incluyendo title y body)
+            # IMPORTANTE: Asegurar que data tenga el tipo de notificación
             notification_data = data if data else {}
             notification_data['type'] = notification_type  # CRUCIAL para routing en frontend
-            notification_data['title'] = title  # 🆕 NUEVO: title en data
-            notification_data['body'] = body    # 🆕 NUEVO: body en data
             
             # Construir mensaje según FCM HTTP v1
-            # 🚨 IMPORTANTE: Ya NO usamos el campo "notification"
             message = messaging.Message(
-                # 🚫 REMOVIDO: notification=messaging.Notification(title=title, body=body)
-                # ✅ Todo va en data ahora
-                data=notification_data,
+                notification=messaging.Notification(
+                    title=title,
+                    body=body,
+                ),
+                data=notification_data,  # Los datos van aquí (NO en notification)
                 token=fcm_token,
                 android=messaging.AndroidConfig(
                     priority='high',
+                    # REMOVIDO: click_action (Ali tiene razón, esto puede causar problemas)
                     notification=messaging.AndroidNotification(
                         sound='default',
+                        # El channel_id ayuda a categorizar notificaciones
                         channel_id='edel_notifications'
                     )
                 ),
@@ -61,6 +59,7 @@ class FCMService:
                         aps=messaging.Aps(
                             sound='default',
                             badge=1,
+                            # Para iOS, los datos deben estar aquí también
                             custom_data=notification_data
                         )
                     )
@@ -71,7 +70,6 @@ class FCMService:
             response = messaging.send(message)
             
             print(f"✅ Notificación enviada exitosamente: {response}")
-            print(f"📦 Data enviada: {notification_data}")
             
             return {
                 "success": True,
@@ -209,13 +207,12 @@ class FCMService:
             Dict con resultado del envío
         """
         try:
-            # ✅ CAMBIO: También aquí ponemos todo en data
-            notification_data = data if data else {}
-            notification_data['title'] = title
-            notification_data['body'] = body
-            
             message = messaging.Message(
-                data=notification_data,
+                notification=messaging.Notification(
+                    title=title,
+                    body=body,
+                ),
+                data=data if data else {},
                 topic=topic,
             )
             
