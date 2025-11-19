@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.models.user import RegisterRequest, LoginRequest, LoginResponse
+from app.models.user import RegisterRequest, LoginRequest, LoginResponse, ChangePasswordRequest, ChangePasswordResponse
 from app.services.firebase_service import firebase_service
 from app.utils.auth_utils import create_access_token, verify_token, invalidate_token
 from firebase_admin import auth
@@ -335,4 +335,112 @@ async def get_current_user_info(credentials: HTTPAuthorizationCredentials = Depe
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al obtener información del usuario: {str(e)}"
+        )
+        
+@router.put("/change-password", response_model=ChangePasswordResponse)
+async def change_password(
+    request: ChangePasswordRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Cambiar contraseña del usuario autenticado
+    
+    - Valida que la contraseña actual sea correcta
+    - Actualiza la contraseña en Firebase Auth
+    - Requiere que el usuario esté autenticado
+    - Nueva contraseña debe tener mínimo 6 caracteres
+    
+    **Header requerido:**
+    - Authorization: Bearer {token}
+    
+    **Body:**
+    - current_password: Contraseña actual
+    - new_password: Nueva contraseña (mínimo 6 caracteres)
+    
+    **Respuesta:**
+    - Mensaje de confirmación
+    - ID del usuario
+    
+    **IMPORTANTE:** 
+    - El token JWT actual seguirá siendo válido después del cambio
+    - El usuario NO necesita volver a iniciar sesión
+    """
+    try:
+        # Verificar token
+        token = credentials.credentials
+        current_user = verify_token(token)
+        user_id = current_user['uid']
+        email = current_user['email']
+        
+        print(f"🔐 Iniciando cambio de contraseña para usuario: {user_id}")
+        
+        # PASO 1: Verificar que la contraseña actual sea correcta
+        verify_url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={settings.firebase_web_api_key}"
+        payload = {
+            "email": email,
+            "password": request.current_password,
+            "returnSecureToken": False
+        }
+        
+        response = requests.post(verify_url, json=payload)
+        
+        if response.status_code != 200:
+            error_data = response.json()
+            error_message = error_data.get('error', {}).get('message', 'Contraseña actual incorrecta')
+            
+            print(f"❌ Contraseña actual incorrecta para usuario: {user_id}")
+            
+            if error_message == "INVALID_PASSWORD":
+                detail = "La contraseña actual es incorrecta"
+            elif error_message == "TOO_MANY_ATTEMPTS_TRY_LATER":
+                detail = "Demasiados intentos fallidos. Intenta más tarde"
+            else:
+                detail = "No se pudo verificar la contraseña actual"
+            
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=detail
+            )
+        
+        print(f"✅ Contraseña actual verificada correctamente")
+        
+        # PASO 2: Actualizar contraseña en Firebase Auth
+        try:
+            auth.update_user(
+                user_id,
+                password=request.new_password
+            )
+            print(f"✅ Contraseña actualizada en Firebase Auth para usuario: {user_id}")
+        except Exception as e:
+            print(f"❌ Error al actualizar contraseña en Firebase Auth: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error al actualizar contraseña: {str(e)}"
+            )
+        
+        # PASO 3: Registrar cambio en Firestore (opcional, para auditoría)
+        db = firebase_service.get_db()
+        try:
+            db.collection('users').document(user_id).update({
+                'password_changed_at': datetime.utcnow()
+            })
+            print(f"✅ Timestamp de cambio de contraseña registrado en Firestore")
+        except Exception as e:
+            # No fallar si esto falla
+            print(f"⚠️ No se pudo registrar timestamp en Firestore: {str(e)}")
+        
+        print(f"🎉 Cambio de contraseña completado exitosamente para usuario: {user_id}")
+        
+        return ChangePasswordResponse(
+            message="Contraseña actualizada exitosamente",
+            user_id=user_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error en cambio de contraseña: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al cambiar contraseña: {str(e)}"
         )
