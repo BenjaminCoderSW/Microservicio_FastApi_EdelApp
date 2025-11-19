@@ -99,3 +99,35 @@ class UserInDB(BaseModel):
                 "profile_image": None
             }
         }
+        
+class ChangePasswordRequest(BaseModel):
+    """Modelo para cambiar contraseña"""
+    current_password: str = Field(..., description="Contraseña actual")
+    new_password: str = Field(..., min_length=6, description="Nueva contraseña (mínimo 6 caracteres)")
+    
+    @validator('new_password')
+    def validate_new_password(cls, v):
+        if len(v) < 6:
+            raise ValueError('La nueva contraseña debe tener al menos 6 caracteres')
+        return v
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "current_password": "Password123!",
+                "new_password": "NewPassword456!"
+            }
+        }
+
+class ChangePasswordResponse(BaseModel):
+    """Respuesta de cambio de contraseña"""
+    message: str
+    user_id: str
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "Contraseña actualizada exitosamente",
+                "user_id": "abc123xyz"
+            }
+        }
