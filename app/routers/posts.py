@@ -4,7 +4,8 @@ from app.models.post import (
     CreatePostRequest, 
     PostResponse, 
     PostListResponse, 
-    CreatePostResponse
+    CreatePostResponse,
+    SearchPostsResponse
 )
 from app.services.firebase_service import firebase_service
 from app.services.moderation_service import moderation_service
@@ -408,6 +409,148 @@ async def get_posts_feed(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al obtener feed: {str(e)}"
+        )
+
+@router.get("/search", response_model=SearchPostsResponse)
+async def search_posts(
+    query: str = Query(..., min_length=1, max_length=100, description="Término de búsqueda"),
+    page: int = Query(1, ge=1, description="Número de página"),
+    page_size: int = Query(20, ge=1, le=100, description="Posts por página"),
+    current_user: Optional[dict] = Depends(get_current_user_optional)
+):
+    """
+    Buscar posts por contenido
+    
+    - Busca en el campo 'content' de los posts
+    - Búsqueda case-insensitive (insensible a mayúsculas/minúsculas)
+    - Retorna posts ordenados por fecha (más recientes primero)
+    - No incluye posts eliminados
+    - Si el usuario está autenticado, incluye el estado de like
+    - **Fecha formateada en español para México**
+    
+    **Parámetros:**
+    - query: Término de búsqueda (1-100 caracteres) - REQUERIDO
+    - page: Número de página (default: 1)
+    - page_size: Posts por página (default: 20, max: 100)
+    
+    **Header opcional:**
+    - Authorization: Bearer {token} (para incluir estado de likes)
+    
+    **Ejemplos de búsqueda:**
+    - "caballos" → Posts que contengan "caballos"
+    - "futbol mexico" → Posts que contengan "futbol" O "mexico"
+    - "inteligencia artificial" → Posts que contengan "inteligencia" O "artificial"
+    
+    **Nota:** Firestore no soporta búsqueda full-text nativa, por lo que
+    esta búsqueda filtra posts descargados. Para mayor escalabilidad,
+    considera usar Algolia o Elasticsearch en producción.
+    """
+    try:
+        # Obtener user_id si está autenticado
+        current_user_id = current_user['uid'] if current_user else None
+        
+        if current_user_id:
+            print(f"✅ Usuario autenticado en búsqueda: {current_user_id}")
+        else:
+            print(f"ℹ️ Usuario no autenticado en búsqueda (público)")
+        
+        # Normalizar query (lowercase para búsqueda case-insensitive)
+        normalized_query = query.lower().strip()
+        
+        # Dividir query en palabras individuales
+        search_terms = normalized_query.split()
+        
+        print(f"🔍 Búsqueda iniciada: query='{query}', términos={search_terms}")
+        
+        db = firebase_service.get_db()
+        
+        # OBTENER TODOS LOS POSTS NO ELIMINADOS
+        # Nota: Firestore no soporta búsqueda full-text, así que obtenemos todos
+        # los posts y filtramos en memoria. Para producción con miles de posts,
+        # considera usar Algolia o Elasticsearch.
+        query_db = db.collection('posts')\
+            .where('is_deleted', '==', False)\
+            .order_by('created_at', direction='DESCENDING')
+        
+        all_posts = list(query_db.stream())
+        
+        # FILTRAR POSTS QUE COINCIDAN CON LA BÚSQUEDA
+        filtered_posts = []
+        for post_doc in all_posts:
+            post_data = post_doc.to_dict()
+            content_lower = post_data['content'].lower()
+            
+            # Verificar si ALGÚN término de búsqueda está en el contenido
+            if any(term in content_lower for term in search_terms):
+                filtered_posts.append(post_doc)
+        
+        total = len(filtered_posts)
+        
+        print(f"✅ Posts encontrados: {total} de {len(all_posts)} totales")
+        
+        # APLICAR PAGINACIÓN
+        offset = (page - 1) * page_size
+        posts_page = filtered_posts[offset:offset + page_size]
+        
+        # Si el usuario está autenticado, obtener todos sus likes de una sola vez
+        user_likes_set = set()
+        if current_user_id:
+            try:
+                likes_query = db.collection('likes').where('user_id', '==', current_user_id).stream()
+                user_likes_set = {like_doc.to_dict()['post_id'] for like_doc in likes_query}
+                print(f"✅ Likes del usuario obtenidos: {len(user_likes_set)} likes")
+            except Exception as e:
+                print(f"⚠️ Error al obtener likes del usuario: {str(e)}")
+        
+        # CONVERTIR A PostResponse con fecha formateada
+        posts_list = []
+        for post_doc in posts_page:
+            post_data = post_doc.to_dict()
+            
+            # Determinar si el usuario dio like a este post
+            user_liked = None
+            if current_user_id:
+                user_liked = post_data['post_id'] in user_likes_set
+            
+            # FORMATEAR FECHA PARA MÉXICO
+            created_at_formatted = format_datetime_mexico(post_data['created_at'])
+            
+            # Crear respuesta con fecha como string formateado
+            post_response = PostResponse(
+                post_id=post_data['post_id'],
+                user_id=post_data['user_id'],
+                alias=post_data['alias'],
+                content=post_data['content'],
+                image_url=post_data.get('image_url'),
+                created_at=created_at_formatted,
+                likes_count=post_data.get('likes_count', 0),
+                comments_count=post_data.get('comments_count', 0),
+                is_deleted=post_data.get('is_deleted', False),
+                user_liked=user_liked
+            )
+            posts_list.append(post_response)
+        
+        # Verificar si hay más páginas
+        has_more = (offset + page_size) < total
+        
+        print(f"✅ Búsqueda completada: página {page}, {len(posts_list)} posts en esta página")
+        
+        return SearchPostsResponse(
+            posts=posts_list,
+            total=total,
+            query=query,
+            page=page,
+            page_size=page_size,
+            has_more=has_more
+        )
+        
+    except Exception as e:
+        print(f"❌ Error en búsqueda de posts: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en búsqueda de posts: {str(e)}"
         )
 
 @router.get("/{post_id}", response_model=PostResponse)

@@ -105,3 +105,24 @@ class ModerationResult(BaseModel):
                 "flagged_by": []
             }
         }
+
+class SearchPostsResponse(BaseModel):
+    """Respuesta de búsqueda de posts"""
+    posts: List[PostResponse]
+    total: int
+    query: str
+    page: int
+    page_size: int
+    has_more: bool
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "posts": [],
+                "total": 15,
+                "query": "caballos",
+                "page": 1,
+                "page_size": 20,
+                "has_more": False
+            }
+        }
