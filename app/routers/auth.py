@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.models.user import RegisterRequest, LoginRequest, LoginResponse, ChangePasswordRequest, ChangePasswordResponse
 from app.services.firebase_service import firebase_service
+from app.services.datadog_service import DatadogService, track_execution_time
 from app.utils.auth_utils import create_access_token, verify_token, invalidate_token
 from firebase_admin import auth
 from datetime import datetime
@@ -13,6 +14,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 security = HTTPBearer()
 
 @router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
+@track_execution_time("auth.register.duration")  # ✅ NUEVO
 async def register(request: RegisterRequest):
     """
     Registrar nuevo usuario
@@ -28,15 +30,26 @@ async def register(request: RegisterRequest):
     - Alias entre 3-20 caracteres
     """
     try:
+        # ✅ NUEVO: Contador de intentos de registro
+        DatadogService.increment_counter(
+            "auth.register.attempts", 
+            tags=["endpoint:/auth/register"]
+        )
+        
         # Verificar si el email ya existe
         try:
             existing_user = auth.get_user_by_email(request.email)
+            # ✅ NUEVO: Email duplicado
+            DatadogService.increment_counter(
+                "auth.register.failed", 
+                tags=["endpoint:/auth/register", "reason:email_exists"]
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="El email ya está registrado"
             )
         except auth.UserNotFoundError:
-            pass  # Email no existe, podemos continuar
+            pass
         
         # Crear usuario en Firebase Auth
         user = auth.create_user(
@@ -69,6 +82,20 @@ async def register(request: RegisterRequest):
         }
         token = create_access_token(token_data)
         
+        # ✅ NUEVO: Registro exitoso
+        DatadogService.increment_counter(
+            "auth.register.success", 
+            tags=["endpoint:/auth/register"]
+        )
+        
+        # ✅ NUEVO: Gauge de usuarios totales
+        total_users = len(list(db.collection('users').stream()))
+        DatadogService.gauge(
+            "users.total_count", 
+            total_users,
+            tags=["type:registered"]
+        )
+        
         return LoginResponse(
             token=token,
             user_id=user.uid,
@@ -81,12 +108,18 @@ async def register(request: RegisterRequest):
         raise
     except Exception as e:
         print(f"❌ Error en registro: {str(e)}")
+        # ✅ NUEVO: Error inesperado
+        DatadogService.increment_counter(
+            "auth.register.error",
+            tags=["endpoint:/auth/register", f"error_type:{type(e).__name__}"]
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al registrar usuario: {str(e)}"
         )
 
 @router.post("/login", response_model=LoginResponse)
+@track_execution_time("auth.login.duration")  # ✅ NUEVO
 async def login(request: LoginRequest):
     """
     Autenticar usuario
@@ -100,6 +133,12 @@ async def login(request: LoginRequest):
     - Contraseña correcta
     """
     try:
+        # ✅ NUEVO: Contador de intentos
+        DatadogService.increment_counter(
+            "auth.login.attempts", 
+            tags=["endpoint:/auth/login"]
+        )
+        
         # Verificar credenciales con Firebase REST API
         verify_url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={settings.firebase_web_api_key}"
         payload = {
@@ -113,6 +152,12 @@ async def login(request: LoginRequest):
         if response.status_code != 200:
             error_data = response.json()
             error_message = error_data.get('error', {}).get('message', 'Credenciales inválidas')
+            
+            # ✅ NUEVO: Login fallido
+            DatadogService.increment_counter(
+                "auth.login.failed",
+                tags=["endpoint:/auth/login", f"reason:{error_message}"]
+            )
             
             if error_message == "EMAIL_NOT_FOUND":
                 detail = "Email no registrado"
@@ -155,6 +200,12 @@ async def login(request: LoginRequest):
         }
         token = create_access_token(token_data)
         
+        # ✅ NUEVO: Login exitoso
+        DatadogService.increment_counter(
+            "auth.login.success", 
+            tags=["endpoint:/auth/login", "method:password"]
+        )
+        
         return LoginResponse(
             token=token,
             user_id=uid,
@@ -167,12 +218,18 @@ async def login(request: LoginRequest):
         raise
     except Exception as e:
         print(f"❌ Error en login: {str(e)}")
+        # ✅ NUEVO: Error inesperado
+        DatadogService.increment_counter(
+            "auth.login.error",
+            tags=["endpoint:/auth/login", f"error_type:{type(e).__name__}"]
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al iniciar sesión: {str(e)}"
         )
 
 @router.post("/logout")
+@track_execution_time("auth.logout.duration")  # ✅ NUEVO
 async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """
     Cerrar sesión
@@ -190,6 +247,12 @@ async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
         
         print(f"✅ Logout exitoso: {payload.get('uid')}")
         
+        # ✅ NUEVO: Logout exitoso
+        DatadogService.increment_counter(
+            "auth.logout.success", 
+            tags=["endpoint:/auth/logout"]
+        )
+        
         return {
             "message": "Sesión cerrada exitosamente",
             "user_id": payload.get('uid')
@@ -197,12 +260,15 @@ async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
         
     except Exception as e:
         print(f"❌ Error en logout: {str(e)}")
+        # ✅ NUEVO: Error en logout
+        DatadogService.increment_counter(
+            "auth.logout.error",
+            tags=["endpoint:/auth/logout", f"error_type:{type(e).__name__}"]
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al cerrar sesión: {str(e)}"
         )
-
-# AGREGAR ESTE ENDPOINT AL ARCHIVO app/routers/auth.py
 
 @router.delete("/account", status_code=status.HTTP_200_OK)
 async def delete_account(

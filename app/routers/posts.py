@@ -10,6 +10,7 @@ from app.models.post import (
 from app.services.firebase_service import firebase_service
 from app.services.moderation_service import moderation_service
 from app.services.storage_service import storage_service
+from app.services.datadog_service import DatadogService, track_execution_time
 from app.utils.auth_utils import verify_token, get_current_user_optional
 from datetime import datetime
 from typing import Optional
@@ -76,8 +77,9 @@ def format_datetime_mexico(dt: datetime) -> str:
     
     return f"{dia} de {mes} de {anio}, {hora_formateada}"
 
-
+# ==================== CREATE POST ====================
 @router.post("/", response_model=CreatePostResponse, status_code=status.HTTP_201_CREATED)
+@track_execution_time("posts.create.duration")  # ✅ NUEVO
 async def create_post(
     request: CreatePostRequest,
     credentials: HTTPAuthorizationCredentials = Depends(security)
@@ -99,6 +101,12 @@ async def create_post(
     - Authorization: Bearer {token}
     """
     try:
+        # ✅ NUEVO: Contador de intentos
+        DatadogService.increment_counter(
+            "posts.create.attempts", 
+            tags=["endpoint:/posts/"]
+        )
+        
         token = credentials.credentials
         current_user = verify_token(token)
         
@@ -108,6 +116,13 @@ async def create_post(
         
         if not moderation_result.is_safe:
             print(f"❌ Contenido rechazado por: {', '.join(moderation_result.flagged_by)}")
+            
+            # ✅ NUEVO: Post rechazado por moderación
+            DatadogService.increment_counter(
+                "posts.moderation.rejected",
+                tags=["endpoint:/posts/", f"reason:{moderation_result.reason}"]
+            )
+            
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
@@ -116,6 +131,12 @@ async def create_post(
                     "flagged_by": moderation_result.flagged_by
                 }
             )
+        
+        # ✅ NUEVO: Post aprobado por moderación
+        DatadogService.increment_counter(
+            "posts.moderation.passed",
+            tags=["endpoint:/posts/"]
+        )
         
         print(f"✅ Contenido aprobado por moderación")
         
@@ -154,6 +175,20 @@ async def create_post(
         
         print(f"✅ Post creado: {post_id} por usuario {current_user['uid']}")
         
+        # ✅ NUEVO: Post creado exitosamente
+        DatadogService.increment_counter(
+            "posts.create.success", 
+            tags=["endpoint:/posts/", f"has_image:{request.image_url is not None}"]
+        )
+        
+        # ✅ NUEVO: Gauge de posts totales
+        total_posts = len(list(db.collection('posts').where('is_deleted', '==', False).stream()))
+        DatadogService.gauge(
+            "posts.total_count", 
+            total_posts,
+            tags=["status:active"]
+        )
+        
         return CreatePostResponse(
             message="Post creado exitosamente",
             post_id=post_id,
@@ -164,6 +199,11 @@ async def create_post(
         raise
     except Exception as e:
         print(f"❌ Error al crear post: {str(e)}")
+        # ✅ NUEVO: Error al crear post
+        DatadogService.increment_counter(
+            "posts.create.error",
+            tags=["endpoint:/posts/", f"error_type:{type(e).__name__}"]
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al crear post: {str(e)}"

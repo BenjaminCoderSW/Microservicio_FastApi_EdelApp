@@ -18,9 +18,20 @@ class Settings(BaseSettings):
     sightengine_api_user: Optional[str] = None
     sightengine_api_secret: Optional[str] = None
     
-    # FCM - No necesitamos Server Key, Admin SDK maneja HTTP v1
-    # Sender ID de FCM (para referencia)
+    # FCM
     fcm_sender_id: Optional[str] = "878232540597"
+    
+    # ✅ DATADOG CONFIGURATION
+    datadog_api_key: Optional[str] = None
+    datadog_app_key: Optional[str] = None
+    datadog_service_name: str = "edel-socialapp-api"
+    datadog_env: str = "production"
+    datadog_version: str = "1.0.0"
+    datadog_enabled: bool = True
+    datadog_trace_enabled: bool = True
+    datadog_profiling_enabled: bool = True
+    datadog_logs_injection: bool = True
+    datadog_site: str = "us5.datadoghq.com"  # ✅ NUEVO: Sitio correcto
     
     # API
     api_title: str = "Edel-SocialApp API"
@@ -29,5 +40,6 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        extra = "allow"
 
 settings = Settings()

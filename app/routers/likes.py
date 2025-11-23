@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.models.interactions import LikeResponse, LikeStatus
 from app.services.firebase_service import firebase_service
+from app.services.datadog_service import DatadogService, track_execution_time
 from app.services.fcm_service import fcm_service
 from app.utils.auth_utils import verify_token
 from datetime import datetime
@@ -11,6 +12,7 @@ router = APIRouter(prefix="/likes", tags=["Likes"])
 security = HTTPBearer()
 
 @router.post("/posts/{post_id}", response_model=LikeResponse)
+@track_execution_time("likes.add.duration")  # ✅ NUEVO
 async def like_post(
     post_id: str,
     credentials: HTTPAuthorizationCredentials = Depends(security)
@@ -34,6 +36,9 @@ async def like_post(
     - Estado de like del usuario
     """
     try:
+        # ✅ NUEVO
+        DatadogService.increment_counter("likes.attempts", tags=["action:add"])
+        
         # Verificar token
         token = credentials.credentials
         current_user = verify_token(token)
@@ -121,6 +126,12 @@ async def like_post(
                 # No fallar si la notificación falla
                 print(f"⚠️ Error al enviar notificación de like: {str(notif_error)}")
         
+        # Al final, antes del return exitoso:
+        DatadogService.increment_counter(
+            "likes.add.success", 
+            tags=["action:add", f"post_id:{post_id[:8]}"]
+        )
+        
         return LikeResponse(
             message="Like agregado exitosamente",
             post_id=post_id,
@@ -132,6 +143,7 @@ async def like_post(
         raise
     except Exception as e:
         print(f"❌ Error al agregar like: {str(e)}")
+        DatadogService.increment_counter("likes.add.error", tags=["action:add"])
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al agregar like: {str(e)}"
